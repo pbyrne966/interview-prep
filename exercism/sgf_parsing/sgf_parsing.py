@@ -152,8 +152,3 @@ def parse(input_string: str) -> SgfTree:
 
     return tree
 
-
-if __name__ == "__main__":
-    input_string = "(;A)"
-    output = parse(input_string)
-    print(output)
