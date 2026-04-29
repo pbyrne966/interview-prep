@@ -1,217 +1,159 @@
-from enum import Enum
-from dataclasses import dataclass
-from typing import Optional, Iterable, Callable
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 
-class Delimeters(Enum):
-    OPENING = "("
-    CLOSING = ")"
-    SEQ = ";"
-    OPENING_NODE = "["
-    CLOSING_NODE = "]"
-
-
-RAW_DELIMS = set([d.value for d in Delimeters._member_map_.values()])
-
-
-@dataclass
-class StateManagement:
-    in_bracket: bool = False
-    found_seq: bool = False
-    append_node: bool = False
-
-    def __repr__(self):
-        return f"in_bracket={self.in_bracket}, found_seq={self.found_seq}, append_node={self.append_node}"
-
-
+@dataclass(eq=True)
 class SgfTree:
-    def __init__(self, properties=None, children=None):
-        self.properties = properties or {}
-        self.children = children or []
-
-    def __eq__(self, other):
-        if not isinstance(other, SgfTree):
-            return False
-        for key, value in self.properties.items():
-            if key not in other.properties:
-                return False
-            if other.properties[key] != value:
-                return False
-        for key in other.properties.keys():
-            if key not in self.properties:
-                return False
-        if len(self.children) != len(other.children):
-            return False
-        for child, other_child in zip(self.children, other.children):
-            if child != other_child:
-                return False
-        return True
-
-    def __ne__(self, other):
-        return not self == other
-
-    def __repr__(self):
-        if self.children:
-            return f"Properties={self.properties}, Children={self.children}"
-        else:
-            return f"Properties={self.properties}"
+    properties: dict[str, list[str]] = field(default_factory=dict)
+    children: list["SgfTree"] = field(default_factory=list)
 
 
-def validate_input(nodes: str):
-    if nodes in ["()"]:
-        raise ValueError("tree with no nodes")
-    if nodes in ["", ";"]:
+class SgfParser:
+    def __init__(self, text: str):
+        self.text = text
+        self.i = 0
+
+    def parse(self) -> SgfTree:
+        if not self.text:
+            raise ValueError("tree missing")
+
+        tree = self._parse_tree()
+
+        if self.i != len(self.text):
+            raise ValueError("unexpected data after tree")
+
+        return tree
+
+    def _parse_tree(self) -> SgfTree:
+        self._expect("(")
+
+        if self._peek() == ")":
+            raise ValueError("tree with no nodes")
+
+        root = self._parse_sequence()
+
+        self._expect(")")
+        return root
+
+    def _parse_sequence(self) -> SgfTree:
+        self._expect(";")
+
+        node = self._parse_node()
+
+        while self._peek() == ";":
+            self._expect(";")
+            node.children.append(self._parse_node())
+
+        while self._peek() == "(":
+            node.children.append(self._parse_tree())
+
+        return node
+
+    def _parse_node(self) -> SgfTree:
+        properties: dict[str, list[str]] = {}
+
+        while self._peek() and self._peek().isalpha():
+            key = self._parse_property_key()
+            values = self._parse_property_values()
+
+            if not values:
+                raise ValueError("properties without delimiter")
+
+            properties.setdefault(key, []).extend(values)
+
+        return SgfTree(properties)
+
+    def _parse_property_key(self) -> str:
+        start = self.i
+
+        while self._peek() and self._peek().isalpha():
+            self.i += 1
+
+        return self.text[start : self.i]
+
+    def _parse_property_values(self) -> list[str]:
+        values = []
+
+        while self._peek() == "[":
+            values.append(self._parse_property_value())
+
+        return values
+
+    def _parse_property_value(self) -> str:
+        self._expect("[")
+        chars: list[str] = []
+
+        while True:
+            c = self._next()
+
+            if c is None:
+                raise ValueError("unterminated property value")
+
+            if c == "]":
+                break
+
+            if c == "\\":
+                escaped = self._next()
+
+                if escaped is None:
+                    break
+
+                if escaped in "\n\r":
+                    continue
+
+                if escaped == "\t":
+                    chars.append(" ")
+                else:
+                    chars.append(escaped)
+
+            elif c == "\t":
+                chars.append(" ")
+            else:
+                chars.append(c)
+
+        return "".join(chars)
+
+    def _peek(self) -> str | None:
+        if self.i >= len(self.text):
+            return None
+        return self.text[self.i]
+
+    def _next(self) -> str | None:
+        if self.i >= len(self.text):
+            return None
+
+        c = self.text[self.i]
+        self.i += 1
+        return c
+
+    def _expect(self, expected: str) -> None:
+        actual = self._next()
+
+        if actual != expected:
+            raise ValueError(f"expected {expected!r}, got {actual!r}")
+
+
+def deep_recur(sgf_tree: SgfTree):
+    top_level = all((elem.isupper() for elem in sgf_tree.properties.keys()))
+    if not top_level:
+        raise ValueError("property must be in uppercase")
+
+    for child in sgf_tree.children:
+        deep_recur(child)
+
+
+def parse(input_string: str) -> SgfTree:
+    if input_string in {"", ";"}:
         raise ValueError("tree missing")
 
+    tree = SgfParser(input_string).parse()
+    deep_recur(tree)
 
-def handle_non_delimiter(
-    c: str,
-    state: StateManagement,
-    curr_root: Optional[SgfTree],
-    root_key: str,
-    built_char: str,
-    raw_chars: Iterable,
-) -> tuple[Optional[SgfTree], str, str]:
-    if state.in_bracket and state.found_seq and not root_key:
-        if curr_root is None:
-            curr_root = SgfTree({root_key: []})
-        else:
-            curr_root.properties[root_key] = []
-    elif state.append_node and curr_root is not None:
-        built_char += c
-    elif root_key != c:
-        root_key = consume_til_predicate(raw_chars, c, state)
-        curr_root.properties[root_key] = []
-    return curr_root, root_key, built_char
-
-
-def consume_til_predicate(
-    chars: Iterable,
-    c: str,
-    state: StateManagement,
-    predicate: Callable[[str], bool] = lambda x: x not in ["[", "]"],
-    consume_all: bool = False,
-) -> str:
-
-    joined = c if (consume_all or c not in RAW_DELIMS) else ""
-
-    current = c
-
-    while predicate(current):
-        try:
-            current = next(chars)
-            if current == "\\":
-                continue
-            if consume_all or current not in RAW_DELIMS:
-                joined += current
-        except:
-            break
-
-    state.found_seq = True
-    state.append_node = True
-
-    return joined
-
-
-def parse(input_string: str) -> Optional[SgfTree]:
-    validate_input(input_string)
-    if input_string == "(;)":
-        return SgfTree()
-
-    raw_chars = iter(input_string)
-    state = StateManagement()
-    curr_root: Optional[SgfTree] = None
-    built_char = ""
-    root_key = ""
-
-    for c in raw_chars:
-        flag = state.append_node
-        print("Line",root_key, c, curr_root, state, flag)
-        
-        if c not in RAW_DELIMS:
-            curr_root, root_key, built_char = handle_non_delimiter(
-                c, state, curr_root, root_key, built_char, raw_chars
-            )
-
-        if c == Delimeters.OPENING.value:
-            if flag:
-                print("DEBUG: OPENING delimiter block reached with append_node=True")
-            state.in_bracket = True
-
-        elif c == Delimeters.SEQ.value and not state.append_node:
-            if flag:
-                print("DEBUG: SEQ delimiter block reached with append_node=True")
-            if not state.found_seq:
-                root_key = consume_til_predicate(raw_chars, c, state)
-                if curr_root is None:
-                    curr_root = SgfTree({root_key: []})
-            else:
-                cut_chars = consume_til_predicate(
-                    raw_chars, c, state, lambda x: x not in [")"], consume_all=True
-                )
-                child = parse(cut_chars)
-                curr_root.children.append(child)
-        elif c == Delimeters.CLOSING.value:
-            if flag:
-                print("DEBUG: CLOSING delimiter block reached with append_node=True")
-            state.in_bracket = False
-        elif c == Delimeters.OPENING_NODE.value:
-            if flag:
-                print("DEBUG: OPENING_NODE delimiter block reached with append_node=True")
-            if not state.append_node:
-                state.append_node = True
-            else:
-                cut_chars = consume_til_predicate(
-                    raw_chars, c, state, lambda x: x not in ["]"], consume_all=True
-                )
-                built_char += cut_chars
-        elif c == Delimeters.CLOSING_NODE.value:
-            if flag:
-                print("DEBUG: CLOSING_NODE delimiter block reached with append_node=True")
-            state.append_node = False
-            curr_root.properties[root_key].append(built_char)
-            built_char = ""
-
-    # if not all((p.isupper() for p in curr_root.properties.keys())):
-    #     raise ValueError("property must be in uppercase")
-
-    return curr_root
+    return tree
 
 
 if __name__ == "__main__":
-    # expected = SgfTree(
-    #     properties={"A": ["a;b", "foo"], "B": ["bar"]},
-    #     children=[SgfTree({"C": ["baz"]})],
-    # )
-    # print(parse("(;A[a;b][foo]B[bar];C[baz])") == expected)
-
-    # input_string = "(;A[x[y\\]z][foo]B[bar];C[baz])"
-    # expected = SgfTree(
-    #     properties={"A": ["x[y]z", "foo"], "B": ["bar"]},
-    #     children=[SgfTree({"C": ["baz"]})],
-    # )
-    # print(parse(input_string) == expected)
-
-    # input_string = "(;A[hello\\\tworld])"
-    # expected = SgfTree(properties={"A": ["hello world"]})
-    # print(parse(input_string), expected)
-
-    # input_string = "(;A[hello\\\nworld])"
-    # expected = SgfTree(properties={"A": ["helloworld"]})
-    # print(parse(input_string), expected)
-
-    # input_string = "(;A[\\t = t and \\n = n])"
-    # expected = SgfTree(properties={"A": ["t = t and n = n"]})
-    # print(parse(input_string), expected)
-
-    # input_string = "(;A[\\]b\nc\\\nd\t\te\\\\ \\\n\\]])"
-    # expected = SgfTree(properties={"A": ["]b\ncd  e\\ ]"]})
-    # print(parse(input_string), expected)
-
-    input_string = "(;A[B](;B[C])(;C[D]))"
-    expected = SgfTree(
-        properties={"A": ["B"]},
-        children=[SgfTree({"B": ["C"]}), SgfTree({"C": ["D"]})],
-    )
-    print(parse(input_string))
-    print(expected)
+    input_string = "(;A)"
+    output = parse(input_string)
+    print(output)
