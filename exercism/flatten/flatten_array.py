@@ -23,5 +23,3 @@ def flatten(iterable: List[Union[int, List[int]]]):
         elif elem is not None:
             flattend.append(elem)
     return flattend
-
-

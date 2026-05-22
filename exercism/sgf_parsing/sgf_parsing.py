@@ -151,4 +151,3 @@ def parse(input_string: str) -> SgfTree:
     deep_recur(tree)
 
     return tree
-
