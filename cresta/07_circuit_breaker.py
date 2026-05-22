@@ -61,29 +61,21 @@ class CircuitBreaker:
     def record_fn_call(self, result_type: str) -> None:
         with self.lock:
             if result_type == "Failure":
-                # In HALF_OPEN a single failure should immediately re-open the circuit
                 if self.current_state == CircuitBreakerState.HALF_OPEN:
                     self.current_state = CircuitBreakerState.OPEN
                     self.entered_open = datetime.now()
                     self.prob_attempts = 0
-                    # record fail count as threshold to reflect open state
                     self.current_fail_states = self.failure_threshold
                     return
 
-                # In CLOSED, count consecutive failures and open when threshold reached
                 self.current_fail_states += 1
                 if self.current_fail_states < self.failure_threshold:
                     return
-
-                # threshold reached -> open circuit
                 if self.current_state == CircuitBreakerState.CLOSED:
                     self.entered_open = datetime.now()
                     self.current_state = CircuitBreakerState.OPEN
 
             elif result_type == "Success":
-                # Success handling depends on current state:
-                # - In HALF_OPEN: count probe successes and close when threshold met
-                # - In CLOSED: reset consecutive failure counter
                 if self.current_state == CircuitBreakerState.HALF_OPEN:
                     self.prob_attempts += 1
                     if self.prob_attempts >= self.probe_successes:
