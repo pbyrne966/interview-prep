@@ -1,0 +1,8 @@
+flowchart LR
+
+    INCIDENT_HISTORY
+        --> EVENT[Workflow Event]
+
+    EVENT --> EMAIL[Email Notification]
+    EVENT --> PUSH[Push Notification]
+    EVENT --> INBOX[Workspace Inbox]

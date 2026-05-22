@@ -1,0 +1,17 @@
+stateDiagram-v2
+
+    [*] --> Open
+
+    Open --> Investigating
+
+    Investigating --> Escalated
+    Escalated --> Assigned
+
+    Assigned --> WaitingOnTeam
+    WaitingOnTeam --> Assigned
+
+    Assigned --> Resolved
+
+    Resolved --> Closed
+
+    Closed --> [*]

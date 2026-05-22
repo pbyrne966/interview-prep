@@ -1,0 +1,87 @@
+erDiagram
+
+    WORKSPACE ||--o{ USER : contains
+    WORKSPACE ||--o{ TEAM : contains
+    WORKSPACE ||--o{ INCIDENT : owns
+
+    TEAM ||--o{ USER : contains
+
+    INCIDENT ||--o{ INCIDENT_ASSIGNMENT : delegated_to
+    TEAM ||--o{ INCIDENT_ASSIGNMENT : collaborates
+    USER ||--o{ INCIDENT_ASSIGNMENT : assigned
+
+    INCIDENT ||--o{ INCIDENT_HISTORY : tracks
+    INCIDENT ||--o{ NOTIFICATION : triggers
+
+    USER ||--o{ USER_ROLE : assigned
+    USER_ROLE ||--o{ PERMISSION : grants
+
+    WORKSPACE {
+        uuid workspace_id PK
+        string name
+    }
+
+    USER {
+        uuid user_id PK
+        uuid workspace_id FK
+        uuid team_id FK
+        string name
+        string email
+        boolean active
+    }
+
+    TEAM {
+        uuid team_id PK
+        uuid workspace_id FK
+        string team_name
+    }
+
+    INCIDENT {
+        uuid incident_id PK
+        uuid workspace_id FK
+        uuid created_by FK
+        string title
+        string description
+        string status
+        string severity
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    INCIDENT_ASSIGNMENT {
+        uuid assignment_id PK
+        uuid incident_id FK
+        uuid assigned_team_id FK
+        uuid assigned_user_id FK
+        string assignment_role
+        timestamp assigned_at
+    }
+
+    INCIDENT_HISTORY {
+        uuid incident_history_id PK
+        uuid incident_id FK
+        uuid updated_by FK
+        jsonb previous_state
+        jsonb updated_state
+        timestamp created_at
+    }
+
+    NOTIFICATION {
+        uuid notification_id PK
+        uuid incident_id FK
+        uuid incident_history_id FK
+        string notification_type
+        boolean sent
+        timestamp created_at
+    }
+
+    USER_ROLE {
+        uuid role_id PK
+        string role_name
+    }
+
+    PERMISSION {
+        uuid permission_id PK
+        uuid role_id FK
+        string action
+    }

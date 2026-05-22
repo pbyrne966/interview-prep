@@ -1,0 +1,22 @@
+erDiagram
+
+    WORKSPACE ||--o{ CONVERSATION : owns
+    CONVERSATION ||--o{ MESSAGE : contains
+
+    CONVERSATION {
+        uuid conversation_id PK
+        uuid workspace_id FK
+        bigint next_sequence_number
+        string status
+        timestamp created_at
+    }
+
+    MESSAGE {
+        uuid message_id PK
+        uuid conversation_id FK
+        bigint sequence_number
+        uuid sender_id
+        string sender_type
+        text body
+        timestamp created_at
+    }

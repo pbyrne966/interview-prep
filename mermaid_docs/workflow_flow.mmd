@@ -1,0 +1,14 @@
+flowchart LR
+
+    CUSTOMER[Customer]
+        --> CHAT[Live Chat Service]
+
+    CHAT --> AGENT[Support Agent]
+
+    AGENT --> INCIDENT[Incident Service]
+
+    INCIDENT --> HISTORY[Incident History]
+
+    HISTORY --> NOTIFY[Notification Service]
+    HISTORY --> ASSIGN[Incident Assignment]
+    HISTORY --> RESOLVE[Resolution Workflow]
