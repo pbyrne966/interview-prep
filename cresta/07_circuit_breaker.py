@@ -1,6 +1,7 @@
 import time
 from enum import Enum
 from threading import Lock, Thread
+from datetime import datetime, timedelta
 
 
 class CircuitBreakerState(Enum):
@@ -26,30 +27,69 @@ class CircuitBreaker:
         self.recovery_timeout = recovery_timeout
         self.probe_successes = probe_successes
         self.current_state = CircuitBreakerState.CLOSED
+        self.entered_open: datetime | None = None
         self.current_fail_states = 0
+        self.prob_attempts = 0
+        self.lock = Lock()
+
         t = Thread(target=self.process_state, daemon=True)
         t.start()
 
     def process_state(self):
         while True:
-            print("Checking state ...")
-            if self.current_state != CircuitBreakerState.CLOSED:
-                ...
+            with self.lock:
+                if self.entered_open is not None:
+                    time_passed = datetime.now() - self.entered_open > timedelta(
+                        seconds=self.recovery_timeout
+                    )
+                    if self.current_state == CircuitBreakerState.OPEN and time_passed:
+                        self.current_state = CircuitBreakerState.HALF_OPEN
+                        self.prob_attempts = 0
 
-            time.sleep(self.recovery_timeout // 4)
+                elif self.current_fail_states >= self.failure_threshold:
+                    self.current_state = CircuitBreakerState.OPEN
+
+            time.sleep(self.recovery_timeout / 2)
+
+    def reset_state(self):
+        self.current_state = CircuitBreakerState.CLOSED
+        self.current_fail_states = 0
+        self.entered_open = None
+        self.prob_attempts = 0
+        self.current_fail_states = 0
 
     def record_fn_call(self, result_type: str) -> None:
-        if result_type == "failure":
-            self.current_fail_states += 1
-            if self.current_fail_states != self.failure_threshold:
-                return
+        with self.lock:
+            if result_type == "Failure":
+                # In HALF_OPEN a single failure should immediately re-open the circuit
+                if self.current_state == CircuitBreakerState.HALF_OPEN:
+                    self.current_state = CircuitBreakerState.OPEN
+                    self.entered_open = datetime.now()
+                    self.prob_attempts = 0
+                    # record fail count as threshold to reflect open state
+                    self.current_fail_states = self.failure_threshold
+                    return
 
-            if self.current_state == CircuitBreakerState.HALF_OPEN:
-                self.current_state = CircuitBreaker.OPEN
-            # self.current_state = CircuitBreakerState.OPEN
+                # In CLOSED, count consecutive failures and open when threshold reached
+                self.current_fail_states += 1
+                if self.current_fail_states < self.failure_threshold:
+                    return
 
-        elif result_type == "sucsess" and self.current_fail_states > 0:
-            self.current_fail_states = 0
+                # threshold reached -> open circuit
+                if self.current_state == CircuitBreakerState.CLOSED:
+                    self.entered_open = datetime.now()
+                    self.current_state = CircuitBreakerState.OPEN
+
+            elif result_type == "Success":
+                # Success handling depends on current state:
+                # - In HALF_OPEN: count probe successes and close when threshold met
+                # - In CLOSED: reset consecutive failure counter
+                if self.current_state == CircuitBreakerState.HALF_OPEN:
+                    self.prob_attempts += 1
+                    if self.prob_attempts >= self.probe_successes:
+                        self.reset_state()
+                elif self.current_state == CircuitBreakerState.CLOSED:
+                    self.current_fail_states = 0
 
     def call(self, fn, *args, **kwargs):
         """
@@ -62,11 +102,12 @@ class CircuitBreaker:
             raise CircuitOpenError("The circuit breaker is open")
 
         try:
-            result = fn(args, kwargs)
-            self.record_fn_call("sucsess")
+            result = fn(*args, **kwargs)
+            self.record_fn_call("Success")
+            return result
         except Exception as e:
-            error_string = str(e)
-            self.record_fn_call("failure")
+            self.record_fn_call("Failure")
+            raise e
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +168,7 @@ if __name__ == "__main__":
     called = False
 
     def sentinel():
-        nonlocal called
+        # nonlocal called
         called = True
 
     try:
